@@ -1460,11 +1460,13 @@ function lockWrap(html) {
 function render() {
   const app = document.getElementById('app');
   let html = '';
-  if (!G || G.screen === 'setup') html = (Net.uiScreen && !Net.inGame) ? renderOnlineScreen() : renderSetup();
+  if (window.__showGallery) html = renderGallery();
+  else if (!G || G.screen === 'setup') html = (Net.uiScreen && !Net.inGame) ? renderOnlineScreen() : renderSetup();
   else if (G.screen === 'draft') html = renderDraft();
   else if (G.screen === 'discard') html = renderDiscard();
   else if (G.screen === 'attack') html = renderAttack();
-  app.innerHTML = lockWrap(html) + renderNotifications() + renderHistoryTab() + (G && G.cardViewer ? renderCardViewer(G.cardViewer) : '');
+  const activeViewerCard = (G && G.cardViewer) ? G.cardViewer : window.__galleryViewerCard;
+  app.innerHTML = lockWrap(html) + renderNotifications() + renderHistoryTab() + (activeViewerCard ? renderCardViewer(activeViewerCard) : '');
   // notifications auto-clear after being shown once
   if (G) setTimeout(() => { if (G) { G.notifications = []; } }, 4200);
   playCombatFx();
@@ -1775,7 +1777,10 @@ function renderSetup() {
       <div class="title">Anime Alliance</div>
       <div class="subtitle">Pass-and-play card game · Draft Phase → Attack Phase</div>
     </div>
-    <span class="helpicon" onclick="showRulesNotes()">house rules / assumptions</span>
+    <div class="row" style="gap:14px;">
+      <span class="helpicon" onclick="window.__showGallery=true; render();">&#128218; view cards</span>
+      <span class="helpicon" onclick="showRulesNotes()">house rules / assumptions</span>
+    </div>
   </div>
   <div class="panel">
     <h2>&#127760; Play Online</h2>
@@ -1811,6 +1816,63 @@ function renderSetup() {
       Auction cards target an opponent — if that opponent holds a Cancel Card, they can block the effect completely.
       Once everyone has 10, any floor left over 10 characters gets trimmed down.
       Then the Attack Phase begins: a single-elimination bracket where teams duel character-by-character until one team is fully defeated.
+    </div>
+  </div>`;
+}
+
+// ====== CARD GALLERY (browse every character, no game needed) ======
+
+function galleryPreviewCard(c) {
+  const full = { ...c };
+  computeDerivedStats(full);
+  full.maxHp = deriveMaxHp(full);
+  full.hp = full.maxHp;
+  return full;
+}
+
+function renderGallery() {
+  const q = (window.__galleryQuery || '').toLowerCase();
+  const rarityFilter = window.__galleryRarity || 'All';
+  const seriesFilter = window.__gallerySeries || 'All';
+  const allSeries = [...new Set(CHARACTERS_RAW.map(c => c.series))].sort();
+
+  let list = CHARACTERS_RAW;
+  if (rarityFilter !== 'All') list = list.filter(c => c.rarity === rarityFilter);
+  if (seriesFilter !== 'All') list = list.filter(c => c.series === seriesFilter);
+  if (q) list = list.filter(c => c.name.toLowerCase().includes(q) || c.series.toLowerCase().includes(q));
+
+  const rarityBtns = ['All', ...RARITY_ORDER.slice().reverse()].map(r =>
+    `<button class="btn btn-sm ${rarityFilter === r ? 'btn-primary' : ''}" onclick="window.__galleryRarity='${r}'; render();">${r}</button>`
+  ).join('');
+
+  const seriesOptions = ['All', ...allSeries].map(s =>
+    `<option value="${esc(s)}" ${seriesFilter === s ? 'selected' : ''}>${esc(s)}</option>`
+  ).join('');
+
+  const cardsHtml = list.map(c => renderCardMini(galleryPreviewCard(c))).join('');
+
+  return `
+  <div class="topbar">
+    <div>
+      <div class="title">Character Gallery</div>
+      <div class="subtitle">${list.length} of ${CHARACTERS_RAW.length} characters</div>
+    </div>
+    <span class="helpicon" onclick="window.__showGallery=false; render();">&larr; back to home</span>
+  </div>
+  <div class="panel">
+    <div class="row" style="margin-bottom:10px; flex-wrap:wrap;">
+      <input class="btn" style="cursor:text; min-width:220px; flex:1;" placeholder="Search by name or series&hellip;"
+        value="${esc(window.__galleryQuery || '')}"
+        oninput="window.__galleryQuery=this.value; render();" />
+      <select class="btn" style="cursor:pointer;" onchange="window.__gallerySeries=this.value; render();">
+        ${seriesOptions}
+      </select>
+    </div>
+    <div class="row" style="margin-bottom:14px; flex-wrap:wrap;">
+      ${rarityBtns}
+    </div>
+    <div class="floor">
+      ${cardsHtml || '<div style="color:var(--ink-dim); font-size:13px;">No characters match your filters.</div>'}
     </div>
   </div>`;
 }
@@ -2159,14 +2221,14 @@ function finishDraftPhase() {
 function openCardViewer(el) {
   try {
     const data = JSON.parse(el.getAttribute('data-card'));
-    G.cardViewer = data;
+    if (G) { G.cardViewer = data; } else { window.__galleryViewerCard = data; }
     render();
   } catch (e) { /* malformed/missing card data — ignore the click */ }
 }
 
 function closeCardViewer(evt) {
   if (evt && evt.target !== evt.currentTarget) return; // only close on backdrop click
-  G.cardViewer = null;
+  if (G) { G.cardViewer = null; } else { window.__galleryViewerCard = null; }
   render();
 }
 
